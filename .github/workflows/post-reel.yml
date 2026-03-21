@@ -1,0 +1,43 @@
+name: Post Reel to X
+
+on:
+  schedule:
+    - cron: '0 11 * * *'  # 20:00 JST (UTC+9 → UTC-9h)
+  workflow_dispatch:       # 手動実行ボタン（テスト用）
+
+jobs:
+  post-reel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # reel_queue.json をコミットバックするため
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Post reel to X
+        env:
+          X_API_KEY:             ${{ secrets.X_API_KEY }}
+          X_API_SECRET:          ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:        ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+        run: python post_reel.py
+
+      - name: Commit updated reel_queue.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add posts/reel_queue.json
+          git diff --staged --quiet || git commit -m "chore: update reel queue [skip ci]"
+          git push
