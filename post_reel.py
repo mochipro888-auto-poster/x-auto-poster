@@ -4,6 +4,7 @@ X リール動画自動投稿スクリプト（GitHub Actions用）
 posts/reel_queue.json から pending エントリを取得し、
 Google Drive から mp4 をダウンロードして X に投稿する。
 投稿成功後は Drive から mp4 を削除し、キューを posted に更新する。
+Drive にファイルが存在しない場合は drive_not_found としてスキップし次のエントリを試みる。
 
 必要な GitHub Secrets:
   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
@@ -24,6 +25,7 @@ from pathlib import Path
 import tweepy
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 QUEUE_PATH = Path("posts/reel_queue.json")
@@ -55,7 +57,7 @@ def build_x_clients():
     return api, client
 
 
-# ── Drive からダウンロード ──────────────────────────────────────────────────
+# ── Drive からダウンロード（ファイル未存在時は HttpError 404 を送出）──────
 def download_from_drive(service, file_id: str, dest_path: str):
     request = service.files().get_media(fileId=file_id)
     with open(dest_path, "wb") as f:
@@ -98,11 +100,22 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
     # v2 create_tweet（Free tier対応）でツイート投稿
     response = client.create_tweet(
         text=caption,
-        media_ids=[media.media_id],
+        media_ids=[str(media.media_id)],
     )
     tweet_id = response.data["id"]
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
     return tweet_id
+
+
+# ── キュー更新して保存 ────────────────────────────────────────────────────
+def update_queue(queue: list, file_id: str, status: str, **extra):
+    for e in queue:
+        if e["file_id"] == file_id:
+            e["status"] = status
+            e.update(extra)
+            break
+    QUEUE_PATH.write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  reel_queue.json: {status} に更新")
 
 
 # ── メイン ──────────────────────────────────────────────────────────────────
@@ -120,44 +133,49 @@ def main():
         print("  投稿待ちエントリなし。スキップ。")
         return
 
-    entry = pending[0]
-    file_id    = entry["file_id"]
-    caption    = entry["caption"]
-    story_name = entry["story_name"]
-    print(f"  ストーリー: {story_name}")
-
     drive = build_drive_service()
     api, client = build_x_clients()
 
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        tmp_path = tmp.name
+    for entry in pending:
+        file_id    = entry["file_id"]
+        caption    = entry["caption"]
+        story_name = entry["story_name"]
+        print(f"  ストーリー: {story_name}")
 
-    try:
-        # Drive からダウンロード
-        download_from_drive(drive, file_id, tmp_path)
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
 
-        # X に投稿
-        post_video_to_x(api, client, tmp_path, caption)
+        try:
+            # Drive からダウンロード（404 の場合はスキップ）
+            try:
+                download_from_drive(drive, file_id, tmp_path)
+            except HttpError as he:
+                if he.resp.status == 404:
+                    print(f"  Drive: ファイルが見つかりません (file_id={file_id})。スキップ。")
+                    update_queue(queue, file_id, "drive_not_found",
+                                 skipped_at=datetime.now().isoformat())
+                    continue
+                raise
 
-        # Drive から削除
-        delete_from_drive(drive, file_id)
+            # X に投稿
+            post_video_to_x(api, client, tmp_path, caption)
 
-        # キューを更新（pending → posted）
-        for e in queue:
-            if e["file_id"] == file_id:
-                e["status"] = "posted"
-                e["posted_at"] = datetime.now().isoformat()
-                break
+            # Drive から削除
+            delete_from_drive(drive, file_id)
 
-        QUEUE_PATH.write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("  reel_queue.json: posted に更新")
+            # キューを posted に更新して終了（1日1件）
+            update_queue(queue, file_id, "posted",
+                         posted_at=datetime.now().isoformat())
+            return
 
-    except Exception as e:
-        print(f"  [ERROR] {e}", file=sys.stderr)
-        sys.exit(1)
+        except Exception as e:
+            print(f"  [ERROR] {e}", file=sys.stderr)
+            sys.exit(1)
 
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    print("  投稿可能なエントリが見つかりませんでした（全件 drive_not_found）。")
 
 
 if __name__ == "__main__":
