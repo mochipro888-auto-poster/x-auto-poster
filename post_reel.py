@@ -41,17 +41,11 @@ def build_drive_service():
 
 # ── X（Twitter）クライアント ────────────────────────────────────────────────
 def build_x_clients():
-    client = tweepy.Client(
-        consumer_key=os.environ["X_API_KEY"],
-        consumer_secret=os.environ["X_API_SECRET"],
-        access_token=os.environ["X_ACCESS_TOKEN"],
-        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
-    )
     auth = tweepy.OAuth1UserHandler(
         os.environ["X_API_KEY"], os.environ["X_API_SECRET"],
         os.environ["X_ACCESS_TOKEN"], os.environ["X_ACCESS_TOKEN_SECRET"],
     )
-    return client, tweepy.API(auth)
+    return tweepy.API(auth)
 
 
 # ── Drive からダウンロード ──────────────────────────────────────────────────
@@ -73,7 +67,8 @@ def delete_from_drive(service, file_id: str):
 
 
 # ── X に動画投稿 ────────────────────────────────────────────────────────────
-def post_video_to_x(api, client, video_path: str, caption: str) -> str:
+def post_video_to_x(api, video_path: str, caption: str) -> str:
+    import time
     print("  X: 動画アップロード中（チャンク分割）...")
     media = api.media_upload(
         filename=video_path,
@@ -81,7 +76,6 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
         chunked=True,
     )
     # アップロード処理完了を待機
-    import time
     for _ in range(30):
         info = api.get_media_upload_status(media.media_id)
         state = info.processing_info.get("state") if hasattr(info, "processing_info") else "succeeded"
@@ -94,11 +88,11 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
 
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
-    response = client.create_tweet(
-        text=caption,
+    status = api.update_status(
+        status=caption,
         media_ids=[media.media_id],
     )
-    tweet_id = response.data["id"]
+    tweet_id = status.id_str
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
     return tweet_id
 
@@ -125,7 +119,7 @@ def main():
     print(f"  ストーリー: {story_name}")
 
     drive = build_drive_service()
-    client, api = build_x_clients()
+    api = build_x_clients()
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp_path = tmp.name
@@ -135,7 +129,7 @@ def main():
         download_from_drive(drive, file_id, tmp_path)
 
         # X に投稿
-        post_video_to_x(api, client, tmp_path, caption)
+        post_video_to_x(api, tmp_path, caption)
 
         # Drive から削除
         delete_from_drive(drive, file_id)
