@@ -97,10 +97,11 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
 
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
-    # v2 create_tweet（Free tier対応）でツイート投稿
+    # v2 create_tweet（OAuth 1.0a User Context 明示）でツイート投稿
     response = client.create_tweet(
         text=caption,
         media_ids=[str(media.media_id)],
+        user_auth=True,
     )
     tweet_id = response.data["id"]
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
