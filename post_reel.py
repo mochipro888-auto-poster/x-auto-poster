@@ -98,11 +98,18 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
     # v2 create_tweet（OAuth 1.0a User Context 明示）でツイート投稿
-    response = client.create_tweet(
-        text=caption,
-        media_ids=[str(media.media_id)],
-        user_auth=True,
-    )
+    try:
+        response = client.create_tweet(
+            text=caption,
+            media_ids=[str(media.media_id)],
+            user_auth=True,
+        )
+    except tweepy.errors.Forbidden as e:
+        print(f"  X: 403 Forbidden")
+        print(f"  X: api_codes={e.api_codes}")
+        print(f"  X: api_messages={e.api_messages}")
+        print(f"  X: response={e.response.text if e.response else 'N/A'}")
+        raise
     tweet_id = response.data["id"]
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
     return tweet_id
