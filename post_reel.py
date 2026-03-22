@@ -98,13 +98,23 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
 
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
-    # OAuth1Session で直接 v2 tweets エンドポイントを呼ぶ（tweepy迂回・詳細ログ取得用）
+    # OAuth1Session で直接 v2 tweets エンドポイントを呼ぶ
     oauth = OAuth1Session(
         client_key=os.environ["X_API_KEY"],
         client_secret=os.environ["X_API_SECRET"],
         resource_owner_key=os.environ["X_ACCESS_TOKEN"],
         resource_owner_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
     )
+
+    # 【診断】まずテキストのみのツイートを試す
+    print("  X: [診断] テキストのみツイートを試行...")
+    r_text = oauth.post(
+        "https://api.twitter.com/2/tweets",
+        json={"text": "[テスト] もちプロ自動投稿診断 - すぐ削除します"},
+    )
+    print(f"  X: [診断] text-only status={r_text.status_code} body={r_text.text}")
+
+    # 本番ツイート（動画付き）
     payload = {
         "text": caption,
         "media": {"media_ids": [str(media.media_id)]},
