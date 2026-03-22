@@ -685,7 +685,7 @@ def generate_image(payload: dict) -> tuple:
 
 def save_image(image_bytes: bytes, chara_key: str, hour_slot: int) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"discord_{chara_key}_{hour_slot}h_{ts}.png"
+    path = OUTPUT_DIR / f"discord_{chara_key}_{hour_slot:02d}h_{ts}.png"
     path.write_bytes(image_bytes)
     print(f"  保存: {path}")
     return path
@@ -705,9 +705,12 @@ def post_to_discord(image_path: Path, dialogue: str, chara_name: str) -> bool:
 
 
 def register_to_x_queue(image_path: Path, dialogue: str, slot_label: str = ""):
+    # X投稿テキストはハッシュタグを除去（Instagram側は auto_upload.py で別途追加）
+    import re as _re
+    text_for_x = _re.sub(r'\s*#\S+', '', dialogue).strip()
     try:
-        register_one(str(image_path), dialogue, slot_label)
-        print(f"  X Queue: [OK] 登録完了")
+        register_one(str(image_path), text_for_x, slot_label)
+        print(f"  X Queue: [OK] 登録完了（ハッシュタグ除去済み）")
     except Exception as e:
         print(f"  X Queue: [NG] 失敗（{e}）")
 

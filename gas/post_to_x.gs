@@ -212,21 +212,33 @@ function pEnc(str) {
 
 // ── トリガー設定（初回1回だけ実行）─────────────────────────────────
 function setupTriggers() {
-  // 既存トリガーをすべて削除
-  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+  // 既存のpostToXトリガーを削除
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === "postToX") ScriptApp.deleteTrigger(t);
+  });
 
-  // 6時, 12時, 15時, 18時, 21時, 0時 に設定
-  // ※GASのatHour()は±1時間の誤差あり
-  [6, 12, 15, 18, 21, 0].forEach(hour => {
+  // 時刻をずらして設定（毎日同じ時刻にならないよう nearMinute でオフセット）
+  // nearMinute は指定分の ±15分 以内に実行される
+  const schedule = [
+    { hour: 6,  minute: 20 },  // 06:05〜06:35 の間
+    { hour: 12, minute: 10 },  // 11:55〜12:25 の間
+    { hour: 15, minute: 40 },  // 15:25〜15:55 の間
+    { hour: 18, minute: 15 },  // 18:00〜18:30 の間
+    { hour: 21, minute: 50 },  // 21:35〜22:05 の間
+    { hour: 0,  minute: 25 },  // 00:10〜00:40 の間
+  ];
+
+  schedule.forEach(({ hour, minute }) => {
     ScriptApp.newTrigger("postToX")
       .timeBased()
       .everyDays(1)
       .atHour(hour)
+      .nearMinute(minute)
       .inTimezone("Asia/Tokyo")
       .create();
   });
 
-  Logger.log("トリガー設定完了（6件）");
+  Logger.log("postToXトリガー設定完了（6件・時刻オフセット済み）");
 }
 
 
@@ -625,22 +637,30 @@ function publishIgMedia(containerId) {
 function setupIgTriggers() {
   // 既存のInstagramトリガー削除
   ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === "postToInstagram") {
-      ScriptApp.deleteTrigger(t);
-    }
+    if (t.getHandlerFunction() === "postToInstagram") ScriptApp.deleteTrigger(t);
   });
 
-  // 6回/日（JST: 6,12,15,18,21,0時）
-  [6, 12, 15, 18, 21, 0].forEach(hour => {
+  // X と同じスケジュールで統一（nearMinute でオフセット）
+  const schedule = [
+    { hour: 6,  minute: 20 },
+    { hour: 12, minute: 10 },
+    { hour: 15, minute: 40 },
+    { hour: 18, minute: 15 },
+    { hour: 21, minute: 50 },
+    { hour: 0,  minute: 25 },
+  ];
+
+  schedule.forEach(({ hour, minute }) => {
     ScriptApp.newTrigger("postToInstagram")
       .timeBased()
       .everyDays(1)
       .atHour(hour)
+      .nearMinute(minute)
       .inTimezone("Asia/Tokyo")
       .create();
   });
 
-  Logger.log("Instagramトリガー設定完了（6件）");
+  Logger.log("Instagramトリガー設定完了（6件・時刻オフセット済み）");
 }
 
 // テスト用：手動で1件投稿確認
