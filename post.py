@@ -18,8 +18,8 @@ from datetime import datetime, timezone, timedelta
 USE_SHEETS = os.environ.get("USE_SHEETS", "false").lower() == "true"
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1OwKCkIzBF0nOCLLP8Bo0ntaRzaVMgeYxlVQewdIhzpM")
 
-# 時間帯スロット定義（discord_auto_gen.py の SLOT_NAMES と合わせる）
-SLOT_NAMES = {6: "朝", 12: "昼", 15: "放課後", 18: "夕方", 21: "夜", 0: "深夜"}
+# 時間帯スロット定義（GAS post_to_x.gs の slotLabel と完全一致させる）
+SLOT_NAMES = {6: "06時（朝）", 12: "12時（昼）", 15: "15時（放課後）", 18: "18時（夕方）", 21: "21時（夜）", 0: "00時（深夜）"}
 
 
 def get_current_slot_label() -> str:
