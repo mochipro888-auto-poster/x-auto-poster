@@ -1,4 +1,5 @@
 tweepy>=4.14.0
+requests-oauthlib>=1.3.0
 
 # Google 連携（Drive・Sheets）
 gspread>=6.0.0

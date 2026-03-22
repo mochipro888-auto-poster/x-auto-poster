@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tweepy
+from requests_oauthlib import OAuth1Session
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -97,20 +98,23 @@ def post_video_to_x(api, client, video_path: str, caption: str) -> str:
 
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
-    # v2 create_tweet（OAuth 1.0a User Context 明示）でツイート投稿
-    try:
-        response = client.create_tweet(
-            text=caption,
-            media_ids=[str(media.media_id)],
-            user_auth=True,
-        )
-    except tweepy.errors.Forbidden as e:
-        print(f"  X: 403 Forbidden")
-        print(f"  X: api_codes={e.api_codes}")
-        print(f"  X: api_messages={e.api_messages}")
-        print(f"  X: response={e.response.text if e.response else 'N/A'}")
-        raise
-    tweet_id = response.data["id"]
+    # OAuth1Session で直接 v2 tweets エンドポイントを呼ぶ（tweepy迂回・詳細ログ取得用）
+    oauth = OAuth1Session(
+        client_key=os.environ["X_API_KEY"],
+        client_secret=os.environ["X_API_SECRET"],
+        resource_owner_key=os.environ["X_ACCESS_TOKEN"],
+        resource_owner_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
+    )
+    payload = {
+        "text": caption,
+        "media": {"media_ids": [str(media.media_id)]},
+    }
+    r = oauth.post("https://api.twitter.com/2/tweets", json=payload)
+    print(f"  X: HTTP status={r.status_code}")
+    print(f"  X: response body={r.text}")
+    if not r.ok:
+        raise RuntimeError(f"X tweet failed: {r.status_code} {r.text}")
+    tweet_id = r.json()["data"]["id"]
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
     return tweet_id
 
