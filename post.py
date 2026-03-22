@@ -11,12 +11,25 @@ import random
 import sys
 import tweepy
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 
 # ── 設定 ────────────────────────────────────────────────────────────────
 USE_SHEETS = os.environ.get("USE_SHEETS", "false").lower() == "true"
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1OwKCkIzBF0nOCLLP8Bo0ntaRzaVMgeYxlVQewdIhzpM")
+
+# 時間帯スロット定義（discord_auto_gen.py の SLOT_NAMES と合わせる）
+SLOT_NAMES = {6: "朝", 12: "昼", 15: "放課後", 18: "夕方", 21: "夜", 0: "深夜"}
+
+
+def get_current_slot_label() -> str:
+    """現在のJST時刻から時間帯ラベルを返す（GitHub Actions はUTCで動作するため+9h変換）"""
+    jst = timezone(timedelta(hours=9))
+    h = datetime.now(tz=jst).hour
+    for slot in [21, 18, 15, 12, 6, 0]:
+        if slot == 0 or h >= slot:
+            return SLOT_NAMES[slot]
+    return SLOT_NAMES[0]
 
 
 # ── X API 認証 ──────────────────────────────────────────────────────────
@@ -43,8 +56,8 @@ def build_clients():
 # ── Google Sheets からキュー取得 ─────────────────────────────────────────
 def get_next_from_sheets():
     """
-    Sheets のキューから未投稿の最初の行を取得し、投稿済みにマーク。
-    列構成: A=テキスト, B=画像パス, C=ステータス, D=投稿日時
+    Sheets の Queue シートから現在の時間帯に合う未投稿行をランダムに1件取得。
+    列構成: A=テキスト, B=DriveID, C=ステータス, D=投稿日時, E=(空), F=時間帯ラベル
     """
     import gspread
     from google.oauth2.service_account import Credentials
@@ -56,29 +69,43 @@ def get_next_from_sheets():
     creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
     gc = gspread.authorize(creds)
 
-    sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+    sheet = gc.open_by_key(SPREADSHEET_ID).worksheet("Queue")
     records = sheet.get_all_values()
 
-    # 未投稿行をすべて収集してランダムに1件選択
+    current_slot = get_current_slot_label()
+    print(f"  現在の時間帯: {current_slot}")
+
+    # 現在の時間帯に合う未投稿行を収集
     pending = []
     for i, row in enumerate(records[1:], start=2):  # 1行目はヘッダー
-        text = row[0] if len(row) > 0 else ""
-        image = row[1] if len(row) > 1 else ""
+        text   = row[0] if len(row) > 0 else ""
+        image  = row[1] if len(row) > 1 else ""
         status = row[2] if len(row) > 2 else ""
-        if text and status != "投稿済み":
+        slot   = row[5] if len(row) > 5 else ""
+        if text and status != "投稿済み" and slot == current_slot:
             pending.append((i, text, image))
+
+    # 同じ時間帯に未投稿がなければ全時間帯の未投稿からランダム選択（フォールバック）
+    if not pending:
+        print(f"  [{current_slot}]の未投稿なし → 全時間帯からランダム選択")
+        for i, row in enumerate(records[1:], start=2):
+            text   = row[0] if len(row) > 0 else ""
+            image  = row[1] if len(row) > 1 else ""
+            status = row[2] if len(row) > 2 else ""
+            if text and status != "投稿済み":
+                pending.append((i, text, image))
 
     if not pending:
         return None, None
 
     # ランダムに1件選択
     i, text, image = random.choice(pending)
-    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+    now = datetime.now(tz=timezone(timedelta(hours=9))).strftime("%Y/%m/%d %H:%M")
     sheet.update(f"C{i}:D{i}", [["投稿済み", now]])
     return text, image or None
 
 
-# ── ローカル queue.json からキュー取得（ランダム選択・重複回避） ───────────
+# ── ローカル queue.json からキュー取得（時間帯フィルタ + ランダム選択） ───
 def get_next_from_local():
     queue_path = Path("posts/queue.json")
     state_path = Path("posts/state.json")
@@ -90,20 +117,37 @@ def get_next_from_local():
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     posted_indices = set(state.get("posted_indices", []))
 
-    # 全て投稿済みならリセット（一巡したらシャッフルして再スタート）
-    all_indices = set(range(len(queue)))
-    remaining = list(all_indices - posted_indices)
-    if not remaining:
-        posted_indices = set()
-        remaining = list(all_indices)
+    current_slot = get_current_slot_label()
+    print(f"  現在の時間帯: {current_slot}")
 
-    # 未投稿からランダムに1件選択
-    idx = random.choice(remaining)
+    def pick_from(indices):
+        """指定インデックス群から未投稿をランダム選択。全投稿済みならリセット後に再選択。"""
+        remaining = [i for i in indices if i not in posted_indices]
+        if not remaining:
+            # この範囲を一巡したのでリセット
+            for i in indices:
+                posted_indices.discard(i)
+            remaining = list(indices)
+        return random.choice(remaining) if remaining else None
+
+    # 同じ時間帯のエントリのみ対象
+    slot_indices = [i for i, e in enumerate(queue) if e.get("slot") == current_slot]
+
+    if slot_indices:
+        idx = pick_from(slot_indices)
+    else:
+        # slot フィールドなし（旧形式）→ 全件からランダム
+        print(f"  slot情報なし → 全件からランダム選択")
+        all_indices = list(range(len(queue)))
+        idx = pick_from(all_indices)
+
+    if idx is None:
+        return None, None
+
     entry = queue[idx]
-
     posted_indices.add(idx)
     state["posted_indices"] = list(posted_indices)
-    state["last_posted_at"] = datetime.now().isoformat()
+    state["last_posted_at"] = datetime.now(tz=timezone(timedelta(hours=9))).isoformat()
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return entry["text"], entry.get("image")
