@@ -45,7 +45,14 @@ def build_x_clients():
         os.environ["X_API_KEY"], os.environ["X_API_SECRET"],
         os.environ["X_ACCESS_TOKEN"], os.environ["X_ACCESS_TOKEN_SECRET"],
     )
-    return tweepy.API(auth)
+    api = tweepy.API(auth)
+    client = tweepy.Client(
+        consumer_key=os.environ["X_API_KEY"],
+        consumer_secret=os.environ["X_API_SECRET"],
+        access_token=os.environ["X_ACCESS_TOKEN"],
+        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
+    )
+    return api, client
 
 
 # ── Drive からダウンロード ──────────────────────────────────────────────────
@@ -67,7 +74,7 @@ def delete_from_drive(service, file_id: str):
 
 
 # ── X に動画投稿 ────────────────────────────────────────────────────────────
-def post_video_to_x(api, video_path: str, caption: str) -> str:
+def post_video_to_x(api, client, video_path: str, caption: str) -> str:
     import time
     print("  X: 動画アップロード中（チャンク分割）...")
     media = api.media_upload(
@@ -88,11 +95,12 @@ def post_video_to_x(api, video_path: str, caption: str) -> str:
 
     print(f"  X: アップロード完了 media_id={media.media_id}")
 
-    status = api.update_status(
-        status=caption,
+    # v2 create_tweet（Free tier対応）でツイート投稿
+    response = client.create_tweet(
+        text=caption,
         media_ids=[media.media_id],
     )
-    tweet_id = status.id_str
+    tweet_id = response.data["id"]
     print(f"  X: 投稿完了 → https://x.com/i/web/status/{tweet_id}")
     return tweet_id
 
@@ -119,7 +127,7 @@ def main():
     print(f"  ストーリー: {story_name}")
 
     drive = build_drive_service()
-    api = build_x_clients()
+    api, client = build_x_clients()
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp_path = tmp.name
@@ -129,7 +137,7 @@ def main():
         download_from_drive(drive, file_id, tmp_path)
 
         # X に投稿
-        post_video_to_x(api, tmp_path, caption)
+        post_video_to_x(api, client, tmp_path, caption)
 
         # Drive から削除
         delete_from_drive(drive, file_id)
